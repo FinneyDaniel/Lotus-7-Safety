@@ -1,0 +1,466 @@
+///*=============================================================================
+//Copyright Enarka India Pvt Ltd (EIPL) All Rights Reserved.
+//All trademarks are owned by Enarka India Private Limited
+//============================================================================ */
+//
+///*==============================================================================
+// @file  mathcalc.c
+// @author DEEPTI.K
+// @date 06-Sep-2021
+//
+// @brief Description
+//==============================================================================*/
+//
+///*==============================================================================
+// Includes
+//==============================================================================*/
+#include <state_machine.h>
+#include "cana_defs.h"
+#include "F28x_Project.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include "inc/hw_can.h"
+#include "inc/hw_ints.h"
+#include "inc/hw_memmap.h"
+#include "inc/hw_types.h"
+#include "hal/driverlib/can.h"
+#include "hal/driverlib/debug.h"
+#include "hal/driverlib/interrupt.h"
+#include "math.h"
+#include "isr.h"
+#include "cana_defs.h"
+#include "canb_defs.h"
+#include "mathcalc.h"
+#include "control_defs.h"
+
+///*==============================================================================
+// Defines
+//==============================================================================*/
+//
+///*==============================================================================
+// Enums
+//==============================================================================*/
+//
+///*==============================================================================
+// Structures
+//==============================================================================*/
+
+MATHCONV_tzREGS MATHConvtzRegs;
+
+///*==============================================================================
+// Macros
+//==============================================================================*/
+//
+///*==============================================================================
+// Local Function Prototypes
+//==============================================================================*/
+
+void MATH_fnCalc(void);
+
+///*==============================================================================
+// Local Variables
+//==============================================================================*/
+
+float32_t LccControl = 60.0;
+
+///*==============================================================================
+// Local Constants
+//==============================================================================*/
+//
+///*=============================================================================
+// @brief infinite loop for the main where tasks are executed is defined here
+//
+// @param void
+// @return void
+// ============================================================================ */
+
+inline float32 math_fnLVLmAtoPercent(float32 LVL_mA)
+{
+    return (((LVL_mA - MATH_mLVL_MIN) / MATH_mLVL_RANGE) * 100);
+
+}
+
+inline float32 math_fnHYSmAtoPercent(float32 HYS_mA, float32 HYSoffset)
+{
+    return ((HYS_mA - MATH_mHYS_MIN - HYSoffset) * 6.25);
+
+}
+
+inline float32 math_fnKTCmVtoTemp(float32 KTC_mV)
+{
+    return (MATH_mKTC_C1 * (KTC_mV) * (KTC_mV) * (KTC_mV))
+            + (MATH_mKTC_C2 * (KTC_mV) * (KTC_mV)) + (MATH_mKTC_C3 * KTC_mV)
+            + MATH_mKTC_C4;
+}
+
+inline float32 math_fnTTCmVtoTemp(float32 TTC_mV)
+{
+    return (MATH_mTTC_C1 * (TTC_mV) * (TTC_mV) * (TTC_mV))
+            + (MATH_mTTC_C2 * (TTC_mV) * (TTC_mV)) + (MATH_mTTC_C3 * TTC_mV)
+            + MATH_mTTC_C4;
+}
+
+inline float32 math_fnPRTmAtoBar(float32 PRT_mV, float32 SPAN, float32 offset)
+{
+    return (((PRT_mV - offset) / MATH_mPRT_RANGE) * SPAN) + MATH_mPRT_LRV;
+}
+
+inline float32 math_fnCOSmAtouSpercm(float32 COS_mV)
+{
+    return (((COS_mV - MATH_mCOS_MIN) / MATH_mCOS_RANGE) * MATH_mCOS_SPAN)
+            + MATH_mCOS_LRV;
+}
+
+inline float32 math_fnRTDmAtoTemp(float32 RTD_mA)
+{
+    return ((RTD_mA * MATH_mRTDGAIN) - MATH_mRTDOFFSET);
+}
+
+//inline float32 math_fnDPmAtoTemp(float32 DP_mA)
+//{
+//    return (((DP_mA -  MATH_mDP_MIN)* MATH_mDP_GAIN) - MATH_mDP_TEMPOFFSET);
+//}
+
+// CJC TO mV conversion
+
+inline float32 math_fnKTCCJCtomV(float32 CJC_temp)
+{
+    return (MATH_mCJC_KTC_C1 * (CJC_temp) * (CJC_temp) * (CJC_temp))
+            + (MATH_mCJC_KTC_C2 * (CJC_temp) * (CJC_temp))
+            + (MATH_mCJC_KTC_C3 * CJC_temp) + MATH_mCJC_KTC_C4;
+}
+
+inline float32 math_fnTTCCJCtomV(float32 CJC_temp)
+{
+    return (MATH_mCJC_TTC_C1 * (CJC_temp) * (CJC_temp) * (CJC_temp))
+            + (MATH_mCJC_TTC_C2 * (CJC_temp) * (CJC_temp))
+            + (MATH_mCJC_TTC_C3 * CJC_temp) + MATH_mCJC_TTC_C4;
+}
+
+void MATH_fnCalc(void)
+{
+    MATHConvtzRegs.AISensorLVL101 = math_fnLVLmAtoPercent(
+            CANA_tzAISensorData.LVL_101);
+    MATHConvtzRegs.AISensorLVL102 = math_fnLVLmAtoPercent(
+            CANA_tzAISensorData.LVL_102);
+    MATHConvtzRegs.AISensorLVL401 = math_fnLVLmAtoPercent(
+            CANA_tzAISensorData.LVL_401);
+
+    MATHConvtzRegs.AISensorHYS101 = math_fnHYSmAtoPercent(
+            CANA_tzAISensorData.HYS_101, 0.0);
+    MATHConvtzRegs.AISensorHYS501 = math_fnHYSmAtoPercent(
+            CANA_tzAISensorData.HYS_501, 0.0);
+    MATHConvtzRegs.AISensorHYS401 = math_fnHYSmAtoPercent(
+            CANA_tzAISensorData.HYS_401, 0.0);
+
+    MATHConvtzRegs.AISensorHYS102 = math_fnHYSmAtoPercent(
+            CANA_tzAISensorData.HYS_102, 0);
+
+    if (CANA_tzThermoCoupleData.TTC_101 > 64.0)
+    {
+        CANA_tzThermoCoupleData.TTC_101 = 0;
+    }
+
+    if (CANA_tzThermoCoupleData.TTC_102 > 64.0)
+    {
+        CANA_tzThermoCoupleData.TTC_102 = 0;
+    }
+
+    if (CANA_tzThermoCoupleData.TTC_301 > 64.0)
+    {
+        CANA_tzThermoCoupleData.TTC_301 = 0;
+    }
+
+    if (CANA_tzThermoCoupleData.KTC_401 > 64.0)
+    {
+        CANA_tzThermoCoupleData.KTC_401 = 0;
+    }
+
+    MATHConvtzRegs.TempSensorTTC101 = math_fnTTCmVtoTemp(
+            math_fnTTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC101_IO])
+                    + CANA_tzThermoCoupleData.TTC_101);
+    MATHConvtzRegs.TempSensorTTC102 = math_fnTTCmVtoTemp(
+            math_fnTTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC101_IO])
+                    + CANA_tzThermoCoupleData.TTC_102);
+    MATHConvtzRegs.TempSensorTTC301 = math_fnTTCmVtoTemp(
+            math_fnTTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC102_IO])
+                    + CANA_tzThermoCoupleData.TTC_301);
+
+    MATHConvtzRegs.TempSensorKTC401 = math_fnKTCmVtoTemp(
+            math_fnKTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC102_IO])
+                    + CANA_tzThermoCoupleData.KTC_401);
+    MATHConvtzRegs.TempSensorKTC402 = math_fnKTCmVtoTemp(
+            math_fnKTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC102_IO])
+                    + CANA_tzThermoCoupleData.KTC_402);
+    MATHConvtzRegs.TempSensorKTC801 = math_fnKTCmVtoTemp(
+            math_fnKTCCJCtomV(CANA_tzIORegs.CJC[CANA_mLHC102_IO])
+                    + CANA_tzThermoCoupleData.KTC_801);
+
+    MATHConvtzRegs.AISensorPRT101 = math_fnPRTmAtoBar(
+            CANA_tzAISensorData.PRT_101, 4, 3.9);
+    MATHConvtzRegs.AISensorPRT102 = math_fnPRTmAtoBar(
+            CANA_tzAISensorData.PRT_102, 4, 4.4);
+    MATHConvtzRegs.AISensorPRT103 = math_fnPRTmAtoBar(
+            CANA_tzAISensorData.PRT_103, 4, 3.9);
+
+    MATHConvtzRegs.AISensorPRT301 = math_fnPRTmAtoBar(
+            CANA_tzAISensorData.PRT_301, 4, 3.9);
+
+    MATHConvtzRegs.AISensorPRT401 = math_fnPRTmAtoBar(
+            CANA_tzAISensorData.PRT_401, 40, 3.9);
+
+    MATHConvtzRegs.AISensorCOS101 = math_fnCOSmAtouSpercm(
+            CANA_tzAISensorData.COS_101);
+
+    MATHConvtzRegs.AISensorRTD_401 = math_fnRTDmAtoTemp(
+            CANA_tzAISensorData.RTD_401);
+
+//    AISensorDPAnalyzer = DP_fnTemp(CANA_tzAISensorData.DP);
+//    AISensorDPAnalyzer1 = ~((int16)(AISensorDPAnalyzer)) + 1;
+
+//    MATHConvtzRegs.AISensorPRTT1 = math_fnPRTmAtoBar(CANA_tzAISensorData.PRT_T1,
+//                                                     60, 3.6);
+//    MATHConvtzRegs.AISensorPRTT2 = math_fnPRTmAtoBar(CANA_tzAISensorData.PRT_T2,
+//                                                     60, 3.995);
+
+//    MATHConvtzRegs.AISensorRTDT1BTM = math_fnRTDmAtoTemp(
+//            CANA_tzAISensorData.RTD_T1_BTM);
+//    MATHConvtzRegs.AISensorRTDT2TOP = math_fnRTDmAtoTemp(
+//            CANA_tzAISensorData.RTD_T2_TOP);
+//    MATHConvtzRegs.AISensorRTDT2BTM = math_fnRTDmAtoTemp(
+//            CANA_tzAISensorData.RTD_T2_BTM);
+
+    if (MATHConvtzRegs.AISensorHYS101 >= 2.0)
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_101 = 1;                 // > 4mA fault
+    }
+    else
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_101 = 0;
+    }
+
+    if (MATHConvtzRegs.AISensorHYS501 >= 2.0)
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_501 = 1;
+    }
+    else
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_501 = 0;
+    }
+
+    if (MATHConvtzRegs.AISensorHYS401 >= 2.0)
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_401 = 1;
+    }
+    else
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_401 = 0;
+    }
+
+    if (MATHConvtzRegs.AISensorHYS102 >= 2.0)
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_102 = 1;                 // > 4mA fault
+    }
+    else
+    {
+        CANA_tzLPCAIFaultRegs.bit.HYS_102 = 0;
+    }
+
+    if ((CANA_tzLPCAIFaultRegs.bit.HYS_101 == 0.0)
+            && (CANA_tzLPCAIFaultRegs.bit.HYS_501 == 0.0)
+            && (CANA_tzLPCAIFaultRegs.bit.HYS_401 == 0.0))
+    //  && (CANA_tzLPCAIFaultRegs.bit.HYS_102 == 0.0)
+    {
+        CANA_tzIOFlags.hydrogenValuesOK = 1;
+    }
+    else if ((CANA_tzLPCAIFaultRegs.bit.HYS_101 == 1)
+            || (CANA_tzLPCAIFaultRegs.bit.HYS_501 == 1)
+            || (CANA_tzLPCAIFaultRegs.bit.HYS_401 == 1))
+    //  || (CANA_tzLPCAIFaultRegs.bit.HYS_102 == 1))
+    {
+        CANA_tzIOFlags.hydrogenValuesOK = 0;
+    }
+
+    if (MATHConvtzRegs.TempSensorTTC101 >= 85.0)  // 75deg
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_101 = 1;
+    }
+    else if (MATHConvtzRegs.TempSensorTTC101 <= 80.0) // 73deg
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_101 = 0;
+    }
+
+    if (MATHConvtzRegs.TempSensorTTC102 >= 82.0)  //80
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_102 = 1;
+    }
+    else if (MATHConvtzRegs.TempSensorTTC102 <= 77.0)  // 75deg
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_102 = 0;
+    }
+
+    if (MATHConvtzRegs.TempSensorTTC301 >= 90.0) // Corresponding mV to be entered  >90
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_301 = 1;
+    }
+    else if (MATHConvtzRegs.TempSensorTTC301 <= 85.0)
+    {
+        CANA_tzThermalFaultRegs.bit.TTC_301 = 0; //<85
+    }
+
+
+
+    if (MATHConvtzRegs.TempSensorKTC401 >= 80.0)  // >90
+    {
+        CANA_tzThermalFaultRegs.bit.KTC_401 = 1;
+    }
+    else if (MATHConvtzRegs.TempSensorKTC401 <= 75.0) //<=88
+    {
+        CANA_tzThermalFaultRegs.bit.KTC_401 = 0;
+    }
+
+    if ((CANA_tzAISensorData.LVL_101 >= 5.6)
+            && (CANA_tzAISensorData.LVL_101 <= 10.4)) // lesser than 60 percent
+    {
+        CANA_tzLHC1AIFaultRegs.bit.LVL_101 = 0;
+    }
+
+    else if ((CANA_tzAISensorData.LVL_101 <= 5.55)
+            || (CANA_tzAISensorData.LVL_101 >= 10.45)) // Greater than 90 percent
+    {
+        CANA_tzLHC1AIFaultRegs.bit.LVL_101 = 1;
+    }
+
+    //  Tank 101 or 102 , if water level is less than 60percent - Water level Not ok
+
+    if (CANA_tzLHC1AIFaultRegs.bit.LVL_101 == 1)
+    //|| (CANA_tzLHC1AIFaultRegs.bit.LVL_102 == 1))
+    {
+        CANA_tzIOFlags.WaterLevelOk = 0;
+    }
+    else if (CANA_tzLHC1AIFaultRegs.bit.LVL_101 == 0)
+    // && (CANA_tzLHC1AIFaultRegs.bit.LVL_102 == 0))
+    {
+        CANA_tzIOFlags.WaterLevelOk = 1;
+    }
+
+    // Pressure Transducer 101 - Pressure of SEP 101 tank
+
+    if (MATHConvtzRegs.AISensorPRT101 <= 0.9)
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_101 = 0;
+    }
+    else if (MATHConvtzRegs.AISensorPRT101 >= 1.0) // Alarm to system - above 1barg
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_101 = 1;
+    }
+
+//    if (MATHConvtzRegs.AISensorPRT101 <= 0.95)
+//    {
+//        CANA_tzLHC1AIFaultRegs.bit.PRT_101 = 0;
+//    }
+//    else if (MATHConvtzRegs.AISensorPRT101 >= 1.0) // Alarm to system - above 1barg
+//    {
+//        CANA_tzLHC1AIFaultRegs.bit.PRT_101 = 1;
+//    }
+
+//    if (CANA_tzAISensorData.PRT_102 >= 18.96)
+//    {
+//        CANA_tzLHC2AIFaultRegs.bit.PRT_102 = 1;
+//    }
+//    else
+//    {
+//        CANA_tzLHC2AIFaultRegs.bit.PRT_102 = 0;
+//    }
+
+    if (MATHConvtzRegs.AISensorPRT102 > 1.15)
+    {
+        CANA_tzLHC2AIFaultRegs.bit.PRT_102 = 0;
+        CONTROLtzFaultRegs.bit.VFDPumpFail = 0;
+    }
+    else if ((MATHConvtzRegs.AISensorPRT102 > 0.51)
+            && (MATHConvtzRegs.AISensorPRT102 <= 1.1))
+    {
+        CANA_tzLHC2AIFaultRegs.bit.PRT_102 = 1;
+        CONTROLtzFaultRegs.bit.VFDPumpFail = 0;
+    }
+    else if (MATHConvtzRegs.AISensorPRT102 < 0.5)
+    {
+        CONTROLtzFaultRegs.bit.VFDPumpFail = 1;
+        CANA_tzLHC2AIFaultRegs.bit.PRT_102 = 0;
+    }
+
+    if ((MATHConvtzRegs.AISensorPRT103 <= 1.3)
+            && (MATHConvtzRegs.AISensorPRT103))
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_103 = 0;
+    }
+    else if (MATHConvtzRegs.AISensorPRT103 >= 1.75) // Alarm to system - above 1barg
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_103 = 1;
+    }
+
+    if (CANA_tzAISensorData.PRT_301 >= 18.96)
+    {
+        // CANA_tzIOFlags .Stack_Out_PRT301_OK = 1;
+        CANA_tzLHC1AIFaultRegs.bit.PRT_301 = 1;
+
+    }
+    else if (CANA_tzAISensorData.PRT_301 <= 18.70)
+    {
+        //  CANA_tzIOFlags .Stack_Out_PRT301_OK = 0;
+        CANA_tzLHC1AIFaultRegs.bit.PRT_301 = 0;
+    }
+
+    //        if (MATHConvtzRegs.AISensorPRT301 <= 0.95)
+    //        {
+    //            CANA_tzLHC1AIFaultRegs.bit.PRT_301 = 0;
+    //        }
+    //        else if (MATHConvtzRegs.AISensorPRT301 >= 1.0) // Alarm to system - above 1barg
+    //        {
+    //            CANA_tzLHC1AIFaultRegs.bit.PRT_301 = 1;
+    //        }
+
+//    if (CANA_tzAISensorData.PRT_401 >= 18.96)
+//    {
+//        CANA_tzLHC1AIFaultRegs.bit.PRT_401 = 1;
+//    }
+//    else if (CANA_tzAISensorData.PRT_401 <= 18.70)
+//    {
+//        CANA_tzLHC1AIFaultRegs.bit.PRT_401 = 0;
+//    }
+
+    if (MATHConvtzRegs.AISensorPRT401 <= 24.9)
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_401 = 0;
+    }
+    else if (MATHConvtzRegs.AISensorPRT401 >= 25.0) // Alarm to system - above 1barg
+    {
+        CANA_tzLHC1AIFaultRegs.bit.PRT_401 = 1;
+    }
+
+    // water Conductivity Fault
+
+    if (MATHConvtzRegs.AISensorCOS101 >= 3.0)
+    {
+        CANA_tzLHC2AIFaultRegs.bit.COS_101 = 1;
+    }
+    else if (MATHConvtzRegs.AISensorCOS101 <= 2.95)
+    {
+        CANA_tzLHC2AIFaultRegs.bit.COS_101 = 0;
+    }
+
+    if (MATHConvtzRegs.TempSensorTTC102 >= LccControl)
+    {
+        CANB_tzSiteRegs.TurnONLCC = 0xCC;
+    }
+    else if (MATHConvtzRegs.TempSensorTTC102 <= (LccControl - 5))
+    {
+        CANB_tzSiteRegs.TurnONLCC = 0x00;
+
+    }
+}
+//
+///*==============================================================================
+// End of File
+//==============================================================================*/
